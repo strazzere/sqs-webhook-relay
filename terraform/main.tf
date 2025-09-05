@@ -12,17 +12,41 @@ provider "aws" {
   region = var.region
 }
 
+# -----------------------------
+# Variables
+# -----------------------------
+variable "project_name" {
+  type    = string
+  default = "webhook-demo"
+}
+
+variable "region" {
+  type    = string
+  default = "us-east-2"
+}
+
+variable "queue_name" {
+  type    = string
+  default = "webhook-demo-queue"
+}
+
+# -----------------------------
 # Data
+# -----------------------------
 data "aws_caller_identity" "me" {}
 
+# -----------------------------
 # SQS queue
+# -----------------------------
 resource "aws_sqs_queue" "webhook" {
   name                       = var.queue_name
   message_retention_seconds  = 1209600
   visibility_timeout_seconds = 60
 }
 
+# -----------------------------
 # IAM role: API Gateway -> SQS
+# -----------------------------
 resource "aws_iam_role" "apigw_sqs_role" {
   name = "${var.project_name}-apigw-sqs-role"
 
@@ -50,7 +74,9 @@ resource "aws_iam_role_policy" "apigw_sqs_policy" {
   })
 }
 
+# -----------------------------
 # API Gateway (REST API v1)
+# -----------------------------
 resource "aws_api_gateway_rest_api" "api" {
   name = "${var.project_name}-rest"
 }
@@ -70,7 +96,7 @@ resource "aws_api_gateway_method" "post_webhook" {
   authorization = "NONE"
 }
 
-# SQS SendMessage
+# Integration: AWS (SQS SendMessage)
 resource "aws_api_gateway_integration" "sqs" {
   rest_api_id = aws_api_gateway_rest_api.api.id
   resource_id = aws_api_gateway_resource.webhook.id
@@ -87,20 +113,13 @@ resource "aws_api_gateway_integration" "sqs" {
     "integration.request.header.Content-Type" = "'application/x-www-form-urlencoded'"
   }
 
-  # Map JSON body + select headers into SQS form-encoded params
-  # This is very specific to github webhooks, modify as needed
+  # Add back header forwarding using safe string concatenation (no heredocs)
   request_templates = {
-    "application/json" = <<-EOT
-      Action=SendMessage&MessageBody=$util.urlEncode($input.body)
-      #set($ct = $input.params().header.get('Content-Type'))
-      #if($ct) &MessageAttribute.1.Name=ContentType&MessageAttribute.1.Value.DataType=String&MessageAttribute.1.Value.StringValue=$util.urlEncode($ct) #end
-      #set($ev = $input.params().header.get('X-GitHub-Event'))
-      #if($ev) &MessageAttribute.2.Name=X-GitHub-Event&MessageAttribute.2.Value.DataType=String&MessageAttribute.2.Value.StringValue=$util.urlEncode($ev) #end
-      #set($dl = $input.params().header.get('X-GitHub-Delivery'))
-      #if($dl) &MessageAttribute.3.Name=X-GitHub-Delivery&MessageAttribute.3.Value.DataType=String&MessageAttribute.3.Value.StringValue=$util.urlEncode($dl) #end
-      #set($sg = $input.params().header.get('X-Hub-Signature-256'))
-      #if($sg) &MessageAttribute.4.Name=X-Hub-Signature-256&MessageAttribute.4.Value.DataType=String&MessageAttribute.4.Value.StringValue=$util.urlEncode($sg) #end
-    EOT
+    "application/json" = "Action=SendMessage&MessageBody=$util.urlEncode($util.base64Encode($input.body))&MessageAttribute.1.Name=BodyIsBase64&MessageAttribute.1.Value.DataType=String&MessageAttribute.1.Value.StringValue=true&MessageAttribute.2.Name=Content-Type&MessageAttribute.2.Value.DataType=String&MessageAttribute.2.Value.StringValue=$util.urlEncode($input.params().header.get('Content-Type'))&MessageAttribute.3.Name=X-GitHub-Event&MessageAttribute.3.Value.DataType=String&MessageAttribute.3.Value.StringValue=$util.urlEncode($input.params().header.get('X-GitHub-Event'))&MessageAttribute.4.Name=X-GitHub-Delivery&MessageAttribute.4.Value.DataType=String&MessageAttribute.4.Value.StringValue=$util.urlEncode($input.params().header.get('X-GitHub-Delivery'))&MessageAttribute.5.Name=X-Hub-Signature-256&MessageAttribute.5.Value.DataType=String&MessageAttribute.5.Value.StringValue=$util.urlEncode($input.params().header.get('X-Hub-Signature-256'))&MessageAttribute.6.Name=User-Agent&MessageAttribute.6.Value.DataType=String&MessageAttribute.6.Value.StringValue=$util.urlEncode($input.params().header.get('User-Agent'))"
+    
+    "text/plain" = "Action=SendMessage&MessageBody=$util.urlEncode($util.base64Encode($input.body))&MessageAttribute.1.Name=BodyIsBase64&MessageAttribute.1.Value.DataType=String&MessageAttribute.1.Value.StringValue=true&MessageAttribute.2.Name=Content-Type&MessageAttribute.2.Value.DataType=String&MessageAttribute.2.Value.StringValue=$util.urlEncode($input.params().header.get('Content-Type'))&MessageAttribute.3.Name=X-GitHub-Event&MessageAttribute.3.Value.DataType=String&MessageAttribute.3.Value.StringValue=$util.urlEncode($input.params().header.get('X-GitHub-Event'))&MessageAttribute.4.Name=X-GitHub-Delivery&MessageAttribute.4.Value.DataType=String&MessageAttribute.4.Value.StringValue=$util.urlEncode($input.params().header.get('X-GitHub-Delivery'))&MessageAttribute.5.Name=X-Hub-Signature-256&MessageAttribute.5.Value.DataType=String&MessageAttribute.5.Value.StringValue=$util.urlEncode($input.params().header.get('X-Hub-Signature-256'))&MessageAttribute.6.Name=User-Agent&MessageAttribute.6.Value.DataType=String&MessageAttribute.6.Value.StringValue=$util.urlEncode($input.params().header.get('User-Agent'))"
+    
+    "application/x-www-form-urlencoded" = "Action=SendMessage&MessageBody=$util.urlEncode($util.base64Encode($input.body))&MessageAttribute.1.Name=BodyIsBase64&MessageAttribute.1.Value.DataType=String&MessageAttribute.1.Value.StringValue=true&MessageAttribute.2.Name=Content-Type&MessageAttribute.2.Value.DataType=String&MessageAttribute.2.Value.StringValue=$util.urlEncode($input.params().header.get('Content-Type'))&MessageAttribute.3.Name=X-GitHub-Event&MessageAttribute.3.Value.DataType=String&MessageAttribute.3.Value.StringValue=$util.urlEncode($input.params().header.get('X-GitHub-Event'))&MessageAttribute.4.Name=X-GitHub-Delivery&MessageAttribute.4.Value.DataType=String&MessageAttribute.4.Value.StringValue=$util.urlEncode($input.params().header.get('X-GitHub-Delivery'))&MessageAttribute.5.Name=X-Hub-Signature-256&MessageAttribute.5.Value.DataType=String&MessageAttribute.5.Value.StringValue=$util.urlEncode($input.params().header.get('X-Hub-Signature-256'))&MessageAttribute.6.Name=User-Agent&MessageAttribute.6.Value.DataType=String&MessageAttribute.6.Value.StringValue=$util.urlEncode($input.params().header.get('User-Agent'))"
   }
 }
 
@@ -129,9 +148,28 @@ resource "aws_api_gateway_integration_response" "integration_200" {
   }
 }
 
-# Deploy + Stage
+# -----------------------------
+# Deploy + Stage (ensure ordering + auto-redeploy on template change)
+# -----------------------------
+locals {
+  redeploy_hash = sha1(jsonencode({
+    templates = aws_api_gateway_integration.sqs.request_templates
+    params    = aws_api_gateway_integration.sqs.request_parameters
+    method    = aws_api_gateway_method.post_webhook.http_method
+    resource  = aws_api_gateway_resource.webhook.path
+  }))
+}
+
 resource "aws_api_gateway_deployment" "deploy" {
   rest_api_id = aws_api_gateway_rest_api.api.id
+
+  triggers = {
+    redeployment = local.redeploy_hash
+  }
+
+  lifecycle {
+    create_before_destroy = true
+  }
 
   depends_on = [
     aws_api_gateway_integration.sqs,
@@ -144,4 +182,21 @@ resource "aws_api_gateway_stage" "stage" {
   rest_api_id   = aws_api_gateway_rest_api.api.id
   deployment_id = aws_api_gateway_deployment.deploy.id
   stage_name    = "prod"
+
+  depends_on = [
+    aws_api_gateway_deployment.deploy
+  ]
+}
+
+# -----------------------------
+# Outputs
+# -----------------------------
+output "queue_url" {
+  value       = aws_sqs_queue.webhook.url
+  description = "SQS queue URL for your local relay."
+}
+
+output "public_webhook_url" {
+  value       = "https://${aws_api_gateway_rest_api.api.id}.execute-api.${var.region}.amazonaws.com/${aws_api_gateway_stage.stage.stage_name}/webhook"
+  description = "Public POST URL to give to GitHub/etc."
 }
